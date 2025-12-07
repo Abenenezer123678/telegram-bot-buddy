@@ -1,7 +1,10 @@
 import os
 import telebot
 import time
+import threading
 from groq import Groq
+from flask import Flask
+from waitress import serve
 
 # === GET API KEYS FROM KOYEB ENVIRONMENT ===
 TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN')
@@ -20,6 +23,22 @@ if not GROQ_API_KEY:
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
 groq_client = Groq(api_key=GROQ_API_KEY)
 conversations = {}
+
+# === HEALTH CHECK SERVER (FOR KOYEB PORT 8000) ===
+app = Flask(__name__)
+
+@app.route('/')
+def health_check():
+    return '✅ Bot is healthy and running!', 200
+
+@app.route('/health')
+def health():
+    return 'OK', 200
+
+def start_health_server():
+    """Start Flask server on port 8000 for Koyeb health checks"""
+    print("🌐 Starting health check server on port 8000...")
+    serve(app, host='0.0.0.0', port=8000)
 
 # === PERSONALITY ===
 def get_system_prompt(username):
@@ -85,16 +104,21 @@ def handle_message(message):
         bot.reply_to(message, error_msg)
         print(f"❌ Error: {e}")
 
-# === START BOT ===
+# === START EVERYTHING ===
 if __name__ == "__main__":
     print("=" * 50)
     print("🤖 BUDDY BOT - KOYEB HOSTED")
     print("=" * 50)
     
-    # Test connection
+    # Start health server in background thread
+    health_thread = threading.Thread(target=start_health_server, daemon=True)
+    health_thread.start()
+    print("✅ Health server started on port 8000")
+    
+    # Test Telegram connection
     try:
         bot_info = bot.get_me()
-        print(f"✅ Connected: @{bot_info.username}")
+        print(f"✅ Telegram connected: @{bot_info.username}")
         print(f"📝 Name: {bot_info.first_name}")
         print(f"🆔 ID: {bot_info.id}")
     except Exception as e:
@@ -104,8 +128,16 @@ if __name__ == "__main__":
     
     print("\n📡 Starting bot server...")
     print("✅ Bot is running 24/7 on Koyeb!")
+    print("🌐 Health check: http://0.0.0.0:8000/health")
     print("💡 Chat: https://t.me/your_Friend_Intisarbot")
     print("=" * 50)
     
     # Start bot
-    bot.infinity_polling(timeout=20, long_polling_timeout=10)
+    try:
+        bot.infinity_polling(timeout=20, long_polling_timeout=10)
+    except KeyboardInterrupt:
+        print("\n👋 Bot stopped by user")
+    except Exception as e:
+        print(f"\n💥 Bot crashed: {e}")
+        print("Restarting in 10 seconds...")
+        time.sleep(10)
